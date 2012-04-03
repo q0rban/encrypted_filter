@@ -1,0 +1,128 @@
+<?php
+
+/**
+ * @file
+ * Encrypted Filter module.
+ */
+
+/**
+ * Implements hook_filter_info().
+ */
+function encrypted_filter_filter_info() {
+  $filters['encrypted_filter_default'] = array(
+    'title' => t('Encrypt portions of text'),
+    'description' => t('Allows you to wrap blocks of text in [encrypt] [/encrypt] tags, so that wrapped text will be encrypted upon display. Note, this does not actually encrypt the stored data, and removing this input filter later will cause the data to be displayed in plain text to the viewer. It also should be noted that this will prevent the filtered text from being cached, which will have a negative impact on the performance of this site.'),
+    'process callback' => '_encrypted_filter_default',
+    'cache' => FALSE,
+  );
+
+  return $filters;
+}
+
+/**
+ * Process callback for the mcrypt filter.
+ */
+function _encrypted_filter_default($text) {
+  preg_match_all('|\[encrypt\](.+?)\[/encrypt\]|se', $text, $matches, PREG_SET_ORDER);
+
+  if (!empty($matches)) {
+    foreach ($matches as $match) {
+      $pattern = '/'. preg_quote($match[0], '/') .'/se';
+      $replacement = _encrypted_filter_encrypted_markup($match[1]);
+      $text = preg_replace($pattern, '$replacement', $text);
+    }
+  }
+  return $text;
+}
+
+/**
+ * Helper function to encrypt a bit of text and return markup for a user.
+ */
+function _encrypted_filter_encrypted_markup($text, stdClass $account = NULL) {
+  $output = '';
+  static $id = 0;
+  $id++;
+
+  if (user_is_logged_in() && user_access('decrypt encrypted text', $account)) {
+    if (!isset($account)) {
+      global $user;
+      $account = $user;
+    }
+    $encrypted = unserialize(encrypt($text));
+    $output .= drupal_render(drupal_get_form('encrypted_filter_decrypt_form', $encrypted['text'], $account, $id));
+  }
+
+  $output .= "<span id='encrypted-filter-{$id}'>";
+    $output .= "<span class='messages'>&nbsp</span>";
+    $output .= "<span class='text'>" . preg_replace('/[^\s]/', '•', strip_tags($text)) . '</span>';
+  $output .= '</span>';
+
+  return $output;
+}
+
+/**
+ * Decrypt text form, for priveleged users.
+ */
+function encrypted_filter_decrypt_form($form, &$form_state, $encrypted_text, $account, $id) {
+  //dpm($form_state);
+  $form['encrypted_text'] = array(
+    '#type' => 'hidden',
+    '#value' => $encrypted_text,
+  );
+
+  $form['name'] = array(
+    '#type' => 'hidden',
+    '#value' => $account->name,
+  );
+
+  $form['id'] = array(
+    '#type' => 'hidden',
+    '#value' => $id,
+  );
+
+  $form['pass'] = array(
+    '#type' => 'password',
+    '#title' => t('Password'),
+    '#description' => t('Please enter your password to decrypt this text.'),
+    '#required' => TRUE,
+  );
+
+  $form['actions']['decrypt'] = array(
+    '#type' => 'submit',
+    '#value' => t('Decrypt'),
+    '#ajax' => array(
+      'callback' => 'encrypted_filter_decrypt_form_ajax',
+    ),
+  );
+
+  return $form;
+}
+
+function encrypted_filter_decrypt_form_ajax($form, $form_state) {
+  $id = $form_state['values']['id'];
+  if (form_get_errors()) {
+    $commands[] = ajax_command_html("#encrypted-filter-{$id} span.messages", theme('status_messages'));
+  }
+  elseif ($form_state['submitted'] && !empty($form_state['decrypted_text'])) {
+    $commands[] = ajax_command_html("#encrypted-filter-{$id} span.text", $form_state['decrypted_text']);
+  }
+
+  return array(
+    '#type' => 'ajax',
+    '#commands' => $commands,
+  );
+}
+
+function encrypted_filter_decrypt_form_validate($form, &$form_state) {
+  $values = $form_state['values'];
+  if (!user_authenticate($values['name'], $values['pass'])) {
+    form_set_error('pass', t('Sorry, invalid password. <a href="@password">Have you forgotten it?</a>', array('@password' => url('user/password'))));
+  }
+}
+
+function encrypted_filter_decrypt_form_submit($form, &$form_state) {
+  $values = $form_state['values'];
+  $form_state['decrypted_text'] = decrypt($values['encrypted_text']);
+  //drupal_set_message(decrypt($values['encrypted_text']));
+}
+

@@ -1,0 +1,5 @@
+name = Encrypted Filter
+description = Provides and Input Filter to encrypt portions of text upon display.
+dependencies[] = encrypt
+package = Encryption
+core = 7.x
